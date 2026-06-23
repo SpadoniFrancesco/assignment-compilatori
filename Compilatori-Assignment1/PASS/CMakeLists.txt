@@ -1,0 +1,45 @@
+cmake_minimum_required(VERSION 3.20)
+project(local-opts)
+
+#===============================================================================
+# 1. LOAD LLVM CONFIGURATION
+#===============================================================================
+# Se non definita, forziamo il percorso standard di LLVM 19 su WSL/Ubuntu
+if(NOT LT_LLVM_INSTALL_DIR)
+  set(LT_LLVM_INSTALL_DIR "/usr/lib/llvm-19" CACHE PATH "LLVM installation directory" FORCE)
+endif()
+
+# Add the location of LLVMConfig.cmake to CMake search paths
+list(APPEND CMAKE_PREFIX_PATH "${LT_LLVM_INSTALL_DIR}/lib/cmake/llvm/")
+
+find_package(LLVM CONFIG REQUIRED)
+if("${LLVM_VERSION_MAJOR}" VERSION_LESS 19)
+  message(FATAL_ERROR "Found LLVM ${LLVM_VERSION_MAJOR}, but need LLVM 19 or above")
+endif()
+
+# HelloWorld includes headers from LLVM - update the include paths accordingly
+include_directories(SYSTEM ${LLVM_INCLUDE_DIRS})
+# Esporta anche le definizioni macro necessarie a LLVM
+add_definitions(${LLVM_DEFINITIONS})
+
+#===============================================================================
+# 2. BUILD CONFIGURATION
+#===============================================================================
+# Use the same C++ standard as LLVM does
+set(CMAKE_CXX_STANDARD 17 CACHE STRING "")
+
+# LLVM is normally built without RTTI. Be consistent with that.
+if(NOT LLVM_ENABLE_RTTI)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
+endif()
+
+#===============================================================================
+# 3. ADD THE TARGET (Modificato per LocalOpts)
+#===============================================================================
+# Usiamo MODULE invece di SHARED: è la configurazione standard per i plugin di opt
+add_library(LocalOpts MODULE LocalOpts.cpp)
+
+# Allow undefined symbols in shared objects on Darwin (this is the default
+# behaviour on Linux)
+target_link_libraries(LocalOpts
+  "$<$<PLATFORM_ID:Darwin>:-undefined dynamic_lookup>")
