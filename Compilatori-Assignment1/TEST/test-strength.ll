@@ -1,9 +1,18 @@
-define dso_local i32 @test_strength_reduction(i32 noundef %arg_x, i32 noundef %arg_y) {
+define dso_local i32 @test_strength_reduction_diff(i32 noundef %arg_x) {
 entry:
-  %res_destra = mul nsw i32 %arg_x, 15
-  %res_sinistra = mul nsw i32 15, %arg_y
-  %controllo = mul nsw i32 %arg_x, %arg_y
-  %temp = add nsw i32 %res_destra, %res_sinistra
-  %final = add nsw i32 %temp, %controllo
+  ; =========================================================================
+  ; TEST 1: Moltiplicazione per 15 (diff = 16 - 15 = 1)
+  ; DEVE ESSERE OTTIMIZZATA in: (x << 4) - x
+  ; =========================================================================
+  %res_ottimizzabile = mul nsw i32 %arg_x, 15
+
+  ; =========================================================================
+  ; TEST 2: Moltiplicazione per 13 (diff = 16 - 13 = 3)
+  ; NON DEVE ESSERE TOCCATA (rimane mul) per evitare introduzione di nuove MUL
+  ; =========================================================================
+  %res_non_ottimizzabile = mul nsw i32 %arg_x, 13
+
+  ; Somma finale per tenere in vita i risultati
+  %final = add nsw i32 %res_ottimizzabile, %res_non_ottimizzabile
   ret i32 %final
 }
