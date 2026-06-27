@@ -1,0 +1,4 @@
+# Ignora tutte le cartelle di build locali e i file temporanei
+build/
+BUILD/
+*.so
