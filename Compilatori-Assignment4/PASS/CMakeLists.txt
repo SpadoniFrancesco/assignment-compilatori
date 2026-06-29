@@ -19,8 +19,6 @@ endif()
 
 # HelloWorld includes headers from LLVM - update the include paths accordingly
 include_directories(SYSTEM ${LLVM_INCLUDE_DIRS})
-# Esporta anche le definizioni macro necessarie a LLVM
-add_definitions(${LLVM_DEFINITIONS})
 
 #===============================================================================
 # 2. BUILD CONFIGURATION
@@ -37,9 +35,9 @@ endif()
 # 3. ADD THE TARGET (LoopFusion)
 #===============================================================================
 # Usiamo MODULE invece di SHARED: è la configurazione standard per i plugin di opt
-add_library(LoopFusion MODULE LoopFusion.cpp)
+add_library(MyLoopFusion SHARED MyLoopFusion.cpp)
 
 # Allow undefined symbols in shared objects on Darwin (this is the default
 # behaviour on Linux)
-target_link_libraries(LoopFusion
+target_link_libraries(MyLoopFusion
   "$<$<PLATFORM_ID:Darwin>:-undefined dynamic_lookup>")
