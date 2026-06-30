@@ -13,9 +13,31 @@
 | **Boundary Condition**        | $\text{in[entry]} = \emptyset$                                                                    |
 | **Initial Interior Points**   | $\text{in[b]} = \mathcal{U}$                                                                      |
 
-- **Gen[b]**: The set of expressions **evaluated** within basic block *b*. These are the expressions that are guaranteed to be computed before any possible exit from the block.
+### Very Busy Expressions (VBE) - Descrizione del Framework
 
-- **Kill[b]**: The set of expressions that can no longer be considered "very busy" when exiting *b* because at least one of the variables used in them is **redefined** within the block. In other words, an expression is killed if one of its operands is modified inside *b*.
+- **Domain**: L'insieme di tutte le espressioni aritmetiche (o logiche) che compaiono all'interno del CFG.
+
+---
+
+- **Direction**: **Backward**. Perché un'espressione possa essere considerata *Very Busy* in un punto $p$ se verrà sicuramente valutata in *futuro* lungo tutti i percorsi possibili prima che i suoi operandi vengano ridefiniti. Di conseguenza, le informazioni devono propagarsi dalla fine del programma verso l'inizio.
+
+---
+
+- **Transfer Function**: $f_b(x) = \text{Gen}[b] \cup (in[b] - \text{Kill}[b])$, un'espressione è *Very Busy* prima del blocco se viene generata all'interno del blocco stesso ($\text{Gen}[b]$), oppure se era richiesta all'uscita ($x$) e nessun operando è stato modificato o "ucciso" durante l'esecuzione del blocco ($\text{Kill}[b]$).
+
+---
+
+- **Meet Operation ($\wedge$)**: **Intersezione ($\cap$)**. un'espressione è Very Busy all'uscita di un blocco solo se viene calcolata in tutti i percorsi futuri possibili. L'intersezione serve proprio a questo: se un'espressione non compare all'inizio di ogni blocco successivo, viene scartata
+
+---
+
+- **Boundary Condition**: $\text{out}[\text{exit}] = \emptyset$.
+
+---
+
+- **Initial Interior Points**: $\text{in}[b] = \mathcal{U}$ Inizializziamo ogni blocco dicendo che contiene tutte le espressioni possibili, sarà poi l'intersezione a filtrare quelle busy.
+
+---
 
 
 ### **VBE Table**
@@ -48,6 +70,30 @@
 | **Boundary Condition**        | $\text{out[entry]} = \emptyset$                                                                           |
 | **Initial Interior Points**   | $\text{out[b]} = \mathcal{U}$                                                                             |
 
+### Dominator Analysis (DA) - Descrizione del Framework
+
+- **Domain**: L'insieme di tutti i Basic Blocks.
+
+---
+
+- **Direction**: **Forward**. E'necessario conoscere i predecessori di un blocco per stabilirne i dominatori, quindi il flusso va "dall'alto verso il basso".
+
+---
+
+- **Transfer Function**: $f_b(x) = x \cup \{b\}$, La funzione prende l'insieme dei dominatori che arrivano all'ingresso del blocco $b$ e vi aggiunge il blocco corrente $\{b\}$ all'uscita ($\text{out}[b]$).
+
+---
+
+- **Meet Operation ($\wedge$)**: **Intersezione ($\cap$)**. Intersezione permette di controllare che ogni percorso contenga un determinato blocco per poterlo definire dominatore.
+
+---
+
+- **Boundary Condition**: $\text{out}[\text{entry}] = \emptyset$.
+
+---
+
+- **Initial Interior Points**: $\text{out}[b] = \mathcal{U}$. Inizializziamo l'uscita di ogni blocco interno dicendo che, ipoteticamente, è dominata da tutti i blocchi del programma. Sara' poi l'intersezione a filtrare.
+
 ### **DA Table**
 
 | **Basic Block** | **In[b]**              | **Out[b]**                |
@@ -78,10 +124,29 @@
 | **Boundary Condition**        | $\text{out[entry]} = \emptyset$                                                                           |
 | **Initial Interior Points**   | $\text{out[b]} = \mathcal{U}$                                                                             |
 
-- **Gen[b]**: The set of pairs $(var, v)$ such that block *b* **assigns** a constant value to variable `var` (i.e., `var = const`). This also includes assignments like `var = expr` if the expression `expr` can be fully evaluated to a known constant using the current known constant values of its operands.
+### Constant Propagation (CP) - Descrizione del Framework
 
+- **Domain**: L'insieme di coppie $(var, val)$, dove $var$ è una variabile del programma (es. $a, b, k, x, y$) e $val$ è il valore costante intero ad essa associato.
 
-- **Kill[b]**: The set of pairs $(var, v)$ for all possible values `v`, where variable `var` is **reassigned** a new value in block *b*, potentially overriding any previous constant value. This essentially kills any previous constant knowledge about `var`.
+---
+
+- **Direction**: **Forward**. Per sapere se una variabile ha un valore costante in un determinato punto, dobbiamo analizzare la storia dei suoi assegnamenti a partire dall'inizio del programma. Le informazioni si propagano dall'alto verso il basso.
+
+---
+
+- **Transfer Function**: $f_b(x) = \text{Gen}[b] \cup (x - \text{Kill}[b])$.
+
+---
+
+- **Meet Operation ($\wedge$)**: **Intersezione ($\cap$)**. È un'analisi di tipo "Must": una variabile è considerata costante all'ingresso di un blocco solo se mantiene lo *stesso identico* valore costante lungo **tutti** i percorsi che convergono in quel punto.
+
+---
+
+- **Boundary Condition**: $\text{out}[\text{entry}] = \emptyset$.
+
+---
+
+- **Initial Interior Points**: $\text{out}[b] = \mathcal{U}$ Inizializziamo ipoteticamente le uscite dei blocchi interni dicendo che contengono ogni possibile associazione costante. Sara' poi l'intersezione a "tenere" le sole variabili davvero costanti in entrambi i percorsi
 
 ### **CP Table – First Iteration**
 
@@ -124,6 +189,5 @@
 | **BB15 (exit)** | $\lbrace (a, 4) \rbrace$                 | $\lbrace (a, 4) \rbrace$                 |
 
 
-### **Convergence**
+Dopo la seconda iterazione si ottiene la convergenza.
 
-Since there are no further changes to the `Out[b]` sets in the second iteration, the constant propagation analysis converges.
