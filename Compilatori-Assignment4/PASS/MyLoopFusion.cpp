@@ -36,7 +36,6 @@ struct MyLoopFusion: public PassInfoMixin<MyLoopFusion> {
           // Rimuoviamo l'istruzione PHI obsoleta di L1 dal suo header
           IndVarL1->eraseFromParent();
       } else {
-          llvm::errs() << "Attenzione: Impossibile trovare la induction variable canonica.\n";
           return;
       }
       
@@ -46,7 +45,7 @@ struct MyLoopFusion: public PassInfoMixin<MyLoopFusion> {
       BasicBlock *HeaderL1 = L1->getHeader();
       BasicBlock *LatchL1  = L1->getLoopLatch();
 
-      // 1. AGGIORNIAMO LE PHI DI HEADER L0 PRIMA DI ALTERARE IL CFG
+      // AGGIORNIAMO LE PHI DI HEADER L0 PRIMA DI ALTERARE IL CFG
       for (PHINode &PN : HeaderL0->phis()) {
           int LatchL0Idx = PN.getBasicBlockIndex(LatchL0);
           if (LatchL0Idx != -1) {
@@ -56,15 +55,13 @@ struct MyLoopFusion: public PassInfoMixin<MyLoopFusion> {
           }
       }
 
-      // 2. MODIFICHIAMO I SALTI DI LATCHL0
-      // Rimuoviamo il vecchio terminatore condizionale (che rompeva il loop)
+      // Rimuoviamo il vecchio terminatore
       Instruction *TermL0 = LatchL0->getTerminator();
       TermL0->eraseFromParent();
       // Creiamo un salto dritto e incondizionato verso il corpo del secondo loop
       BranchInst::Create(HeaderL1, LatchL0); 
       
-      // 3. AGGIORNIAMO LE PHI DI HEADER L1
-      // Il flusso che prima arrivava dal preheader di L1 ora arriva direttamente dal Latch di L0!
+      // AGGIORNIAMO LE PHI DI HEADER L1
       for (PHINode &PN : HeaderL1->phis()) {
           int Index = PN.getBasicBlockIndex(L1->getLoopPreheader());
           if (Index != -1) {
@@ -72,7 +69,7 @@ struct MyLoopFusion: public PassInfoMixin<MyLoopFusion> {
           }
       }
 
-      // 4. COLLEGHIAMO IL RITORNO (Il Latch di L1 ora torna all'inizio di tutto: HeaderL0)
+      // COLLEGHIAMO IL RITORNO (Il Latch di L1 ora torna all'inizio di tutto: HeaderL0)
       Instruction *TermL1 = LatchL1->getTerminator();
       for (unsigned i = 0; i < TermL1->getNumSuccessors(); ++i) {
           if (TermL1->getSuccessor(i) == HeaderL1) {
@@ -111,11 +108,11 @@ struct MyLoopFusion: public PassInfoMixin<MyLoopFusion> {
     // Registro dei loop eliminati per evitare Segmentation Fault
     std::set<Loop *> ErasedLoops;
 
-    // creazione della worklist dei loop da processare (Loop Versioning)
+    // creazione della worklist dei loop da processare, prendiamo i loop dal piu' interno al piu' esterno
     SmallVector<Loop *, 8> Worklist;
     for (Loop *TopLevelLoop : LI) {
         for (Loop *L : depth_first(TopLevelLoop))
-        // We only handle inner-most loops.
+        // Prendiamo solo i loop "foglia".
         if (L->isInnermost())
         Worklist.push_back(L);
     }
@@ -123,44 +120,34 @@ struct MyLoopFusion: public PassInfoMixin<MyLoopFusion> {
     llvm::errs() << "[DEBUG] Numero di loop innermost trovati nella worklist: " << Worklist.size() << "\n";
 
     for (Loop *L0 : Worklist) {
-        llvm::errs() << "\n[DEBUG] Esamino potenziale candidiato L0: " << L0->getHeader()->getName() << "\n";
 
-        if (ErasedLoops.count(L0)) {
-            llvm::errs() << "  -> Salto L0: è già stato fuso in precedenza.\n";
+        if (ErasedLoops.count(L0)) { // controlliamo se il loop L0 è già stato fuso in precedenza
             continue;
         }
-        if (!L0->isLoopSimplifyForm()) {
-            llvm::errs() << "  -> Controllo Fallito: L0 NON è in Loop Simplify Form.\n";
+        if (!L0->isLoopSimplifyForm()) { // controlliamo se il loop L0 è in forma semplificata
             continue;
         }
 
         // Prendiamo l'uscita di L0
         BasicBlock *ExitL0 = L0->getExitBlock();
-        if (!ExitL0) {
-            llvm::errs() << "  -> Controllo Fallito: L0 non ha un unico ExitBlock (ha uscite multiple o condizionali).\n";
+        if (!ExitL0) { // controlliamo se ha uscite multiple o condizionali
             continue;
         }
-        llvm::errs() << "  -> ExitBlock di L0 trovato: " << ExitL0->getName() << "\n";
 
-        // Nel caso non-guarded, l'ExitBlock di L0 è il Preheader di L1.
-        // Quindi l'Header di L1 sarà il successore unico di questo blocco.
+        // Controlliamo se il loop ha un unico successore.
         BasicBlock *PossibleHeaderL1 = ExitL0->getUniqueSuccessor();
         if (!PossibleHeaderL1) {
-            llvm::errs() << "  -> Controllo Fallito: L'ExitBlock di L0 non ha un UniqueSuccessor chiaro per agganciare L1.\n";
             continue;
         }
-        llvm::errs() << "  -> Successore unico dell'uscita trovato: " << PossibleHeaderL1->getName() << "\n";
 
         // Chiediamo a LoopInfo (LI) se quel blocco appartiene a un loop
         Loop *L1 = LI.getLoopFor(PossibleHeaderL1);
 
         if (!L1) {
-            llvm::errs() << "  -> Controllo Fallito: Il blocco successivo all'uscita non appartiene a nessun Loop (L1 è nullo).\n";
             continue;
         }
-        llvm::errs() << "  -> Trovato adiacente L1 con Header: " << L1->getHeader()->getName() << "\n";
 
-        // Verifichiamo che L1 esista, che L1 sia diverso da L0 e sia in forma semplificata
+        // Verifichiamo che L1 esista, che L1 sia diverso da L0 e sia in forma semplificata o gia' fuso.
         if (L1 == L0) {
             llvm::errs() << "  -> Controllo Fallito: L1 coincide con L0 (auto-riferimento).\n";
             continue;
@@ -180,12 +167,7 @@ struct MyLoopFusion: public PassInfoMixin<MyLoopFusion> {
         bool L0DominatesL1 = DT.dominates(HeaderL0, HeaderL1);
         bool L1PostDominatesL0 = PDT.dominates(HeaderL1, HeaderL0);
 
-        llvm::errs() << "  -> Verifica Equivalenza Control Flow:\n";
-        llvm::errs() << "     - L0 domina L1? " << (L0DominatesL1 ? "SI" : "NO") << "\n";
-        llvm::errs() << "     - L1 post-domina L0? " << (L1PostDominatesL0 ? "SI" : "NO") << "\n";
-
-        if (!L0DominatesL1 || !L1PostDominatesL0) {
-            llvm::errs() << "  -> Controllo Fallito: I due loop non sono Control Flow Equivalent.\n";
+        if (!L0DominatesL1 || !L1PostDominatesL0) { // sono control flow equivalent?
             continue;
         }
 
@@ -195,18 +177,13 @@ struct MyLoopFusion: public PassInfoMixin<MyLoopFusion> {
 
         // SCEV è riuscito a calcolarli?
         if (isa<SCEVCouldNotCompute>(TripCountL0) || isa<SCEVCouldNotCompute>(TripCountL1)) {
-            llvm::errs() << "  -> FUSION FALLITA: SCEV non è riuscito a calcolare matematicamente il trip count.\n";
             continue; 
         }
 
         // Confronto dei trip count dei due loop
         if (TripCountL0 != TripCountL1) {
-            llvm::errs() << "  -> FUSION FALLITA: Trip count diversi simbolicamente\n";
-            llvm::errs() << "     - L0 TC: " << *TripCountL0 << "\n";
-            llvm::errs() << "     - L1 TC: " << *TripCountL1 << "\n";
             continue;
         }
-        llvm::errs() << "  -> Trip Count Identici! Procedo all'analisi delle dipendenze di memoria.\n";
 
         // Inseriamo le istruzioni di memoria di L0 e L1 in due vettori distinti
         SmallVector<Instruction *, 32> MemInstsL0;
@@ -229,9 +206,6 @@ struct MyLoopFusion: public PassInfoMixin<MyLoopFusion> {
                 }
             }
         }
-
-        llvm::errs() << "     - Istruzioni memoria in L0: " << MemInstsL0.size() << "\n";
-        llvm::errs() << "     - Istruzioni memoria in L1: " << MemInstsL1.size() << "\n";
 
         bool HasNegativeDistanceDependence = false;
 
@@ -269,19 +243,17 @@ struct MyLoopFusion: public PassInfoMixin<MyLoopFusion> {
             if (HasNegativeDistanceDependence) break;
         }
 
-        // 4. Se è stata trovata una dipendenza negativa, saltiamo questa coppia di loop
+        // E' stata trovata una dipendenza negativa, saltiamo questa coppia di loop
         if (HasNegativeDistanceDependence) {
             continue;
-        } else {
-            llvm::errs() << "  -> [OK] Tutti i controlli superati! Invoco FondiLoop...\n";
+        } else { // controlli superati, possiamo fondere i loop
             FondiLoop(L0, L1, LI, DT);
             ErasedLoops.insert(L1);
         }
-    } // <-- Chiude il ciclo for (Loop *L0 : Worklist)
+    }
 
     if (!ErasedLoops.empty()) {
-        // Abbiamo fuso i loop! Comunichiamo a LLVM che l'IR è cambiato 
-        // e che non deve osare fare rollback o mantenere vecchie analisi.
+        // Abbiamo fuso i loop, Comunichiamo a LLVM che l'IR è cambiato 
         return PreservedAnalyses::none(); 
     }
     
