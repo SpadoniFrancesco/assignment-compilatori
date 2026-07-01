@@ -29,13 +29,13 @@ struct LoopPass : public PassInfoMixin<LoopPass> {
             return PreservedAnalyses::all();
         }
 
-        for (LoopInfo::iterator L = LI.begin(); L != LI.end(); ++L) {
+        for (LoopInfo::iterator L = LI.begin(); L != LI.end(); ++L) { // iteriamo sui loop della funzione
             Loop *LL = *L; // handle al loop corrente
 
             bool changed = true;
-            std::set<Instruction*> Invariants;
+            std::set<Instruction*> Invariants; // set delle istruzioni invarianti
 
-            while (changed) { //finché ci sono cambiamenti, continuo a cercare invarianti
+            while (changed) { // Algoritmo a punto fisso: serve per risolvere le catene di dipendenze tra istruzioni invarianti (es. se B dipende da A, scopriamo che B è invariante solo al giro successivo a quello in cui abbiamo scoperto A)
                 changed = false;
                 for (BasicBlock *BB : LL->getBlocks()){ //iteriamo sui blocchi del loop
                     for (Instruction &I : *BB) {
@@ -47,7 +47,7 @@ struct LoopPass : public PassInfoMixin<LoopPass> {
                         if (Invariants.count(&I))
                             continue;
 
-                        bool isInstInvariant = true;
+                        bool isInstInvariant = true; // ipotizziamo che l'istruzione sia sempre invariante
 
                         for (auto &Op : I.operands()) { //iteriamo sugli operandi dell'istruzione
                             Value *V = Op.get();
@@ -59,17 +59,16 @@ struct LoopPass : public PassInfoMixin<LoopPass> {
                             
                             // È un'istruzione?
                             if (Instruction *OpInst = dyn_cast<Instruction>(V)) {
-                                // Definita fuori dal loop
+                                // Definita fuori dal loop, quindi il suo valore non cambia durante le iterazioni del loop
                                 if (!LL->contains(OpInst->getParent())) {
                                     continue;
                                 }
-                                // Definita dentro, ma già marcata come invariante
+                                // L'istruzione che definisce quel valore è dentro il loop, se tale istruzione e' invariante allora lo sara' anche questa istruzione
                                 if (Invariants.count(OpInst)) {
                                     continue;
                                 }
                             }
                             
-                            // Se un operando fallisce tutti i controlli, l'istruzione NON è invariante
                             isInstInvariant = false;
                             break;
                         }
@@ -77,34 +76,34 @@ struct LoopPass : public PassInfoMixin<LoopPass> {
                         // Se tutti gli operandi sono invarianti, la aggiungiamo!
                         if (isInstInvariant) {
                             Invariants.insert(&I);
-                            changed = true; // Il punto fisso deve continuare!
+                            changed = true;
                         }
                     }
                 }
             }
 
-            //creazione del vettore dei candidati al code motion
+            // vettore dei candidati al code motion
             std::vector<Instruction*> CodeMotionCandidates;
 
+            // Il blocco dell'istruzione domina tutte le uscite?
             for (Instruction *I : Invariants) {
-                // Il blocco dell'istruzione domina tutte le uscite?
-                BasicBlock *InstBlock = I->getParent();
-                SmallVector<BasicBlock*, 4> ExitBlocks; // <-- Cambiato in SmallVector
-                LL->getExitBlocks(ExitBlocks);
+                BasicBlock *InstBlock = I->getParent(); // Prendiamo il basickblock dell'istruzione
+                SmallVector<BasicBlock*, 4> ExitBlocks;
+                LL->getExitBlocks(ExitBlocks); // Prendiamo tutti i blocchi di uscita del loop
                 
                 bool dominatesAllExits = true;
 
                 for (BasicBlock *ExitBB : ExitBlocks) {
-                    if (!DT.dominates(InstBlock, ExitBB)) {
+                    if (!DT.dominates(InstBlock, ExitBB)) { // Il blocco dell'istruzione non domina un blocco di uscita
                         dominatesAllExits = false;
                         break;
                     }
                 }
 
+                // Domina anche tutti gli utenti interni al loop?
                 if (dominatesAllExits) {
                     bool dominatesAllUsers = true;
 
-                    // Controlliamo se l'istruzione domina tutti i suoi utenti all'interno del loop
                     for (User *U : I->users()) {
                         // Ci interessano solo gli utenti che sono a loro volta istruzioni
                         if (Instruction *UserInst = dyn_cast<Instruction>(U)) {
@@ -115,8 +114,8 @@ struct LoopPass : public PassInfoMixin<LoopPass> {
                                 
                                 // Se l'utente è dentro il loop, il blocco di I deve dominarlo!
                                 if (!DT.dominates(InstBlock, UserBlock)) {
-                                    dominatesAllUsers = false; // <-- Corretto il refuso qui
-                                    break; // Condizione fallita per questo utente
+                                    dominatesAllUsers = false;
+                                    break; 
                                 }
                             }
                         }
@@ -132,32 +131,32 @@ struct LoopPass : public PassInfoMixin<LoopPass> {
             // Spostamento nel Preheader
             BasicBlock *Preheader = LL->getLoopPreheader();
             if (Preheader && !CodeMotionCandidates.empty()) {
-                Instruction *Terminator = Preheader->getTerminator();
+                Instruction *Terminator = Preheader->getTerminator(); // prendiamo il terminator del preheader per spostare le istruzioni prima di lui
                 
-                // Insieme per tenere traccia di quali istruzioni abbiamo GIÀ spostato nel preheader
+                // Set in cui tentiamo traccia di quali istruzioni abbiamo GIÀ spostato nel preheader
                 std::set<Instruction*> MovedInstructions;
                 
-                outs() << "\n>>> ESECUZIONE CODE MOTION (DFS) <<<\n";
+                outs() << "\n>>> ESECUZIONE CODE MOTION <<<\n";
                 
-                // Usiamo il DFSTraversal di LLVM sui blocchi del loop
                 for (BasicBlock *BB : LL->getBlocks()) {
                     
-                    // Iteratore esplicito sulle istruzioni del blocco
+                    // Iteriamo sulle istruzioni del blocco
                     for (auto InstIt = BB->begin(), InstEnd = BB->end(); InstIt != InstEnd; ) {
                         Instruction &I = *InstIt;
-                        ++InstIt; // Incrementiamo SUBITO l'iteratore prima di toccare l'istruzione!
+                        ++InstIt; // Incrementiamo qui l'iteratore per evitare problemi se spostiamo l'istruzione e invalidiamo l'iteratore
                         
-                        // Controlliamo se questa istruzione è tra i candidati validati
+                        // Controlliamo se questa istruzione è tra i candidati alla code motion
                         auto it = std::find(CodeMotionCandidates.begin(), CodeMotionCandidates.end(), &I);
-                        if (it != CodeMotionCandidates.end()) {
+                        if (it != CodeMotionCandidates.end()) { // se non è tra i candidati find ci restitiusce .end()
                             
                             // Spostare l’istruzione candidata nel preheader se tutte le istruzioni invarianti da cui questa dipende sono state spostate
                             bool readyToMove = true;
                             for (auto &Op : I.operands()) {
+                                // Prendiamo l'istruzione che definisce l'operando
                                 if (Instruction *OpInst = dyn_cast<Instruction>(Op.get())) {
                                     // Se l'operando è dentro il loop ed è un'istruzione invariante
                                     if (LL->contains(OpInst->getParent()) && Invariants.count(OpInst)) {
-                                        // ...deve essere già stata spostata!
+                                        // Se l'operando non è stato ancora spostato, non possiamo spostare questa istruzione
                                         if (!MovedInstructions.count(OpInst)) {
                                             readyToMove = false;
                                             break;
@@ -171,7 +170,7 @@ struct LoopPass : public PassInfoMixin<LoopPass> {
                                 I.print(outs());
                                 outs() << "\n";
                                 
-                                I.moveBefore(Terminator); // Ora lo spostamento è sicuro!
+                                I.moveBefore(Terminator); // Spostiamo prima del terminator
                                 MovedInstructions.insert(&I); 
                             }
                         }
